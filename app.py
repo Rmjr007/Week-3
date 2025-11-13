@@ -319,10 +319,16 @@ def page_analytics():
     with st.expander("Preview data (first 10 rows)"):
         st.dataframe(df.head(10))
     with st.expander("Summary & correlation"):
-        st.write(df.describe(include='all'))
-        if 'avg_cost_ev' in df.columns:
-            st.subheader("Correlation with avg_cost_ev")
-            st.write(df.corr()['avg_cost_ev'].sort_values(ascending=False))
+    st.write(df.describe(include='all'))
+
+    st.subheader("Correlation with avg_cost_ev")
+
+    numeric_df = df.select_dtypes(include=[np.number])
+
+    if 'avg_cost_ev' in numeric_df.columns:
+        st.write(numeric_df.corr()['avg_cost_ev'].sort_values(ascending=False))
+    else:
+        st.info("avg_cost_ev is not numeric or is missing from numeric columns.")
     st.markdown("---")
     st.subheader("Policy Simulator — Multi-Policy")
     st.write("Adjust policy levers (sidebar) then refine here and run prediction.")
