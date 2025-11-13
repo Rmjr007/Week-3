@@ -326,9 +326,9 @@ def page_analytics():
         numeric_df = df.select_dtypes(include=[np.number])
 
         if 'avg_cost_ev' in numeric_df.columns:
-        st.write(numeric_df.corr()['avg_cost_ev'].sort_values(ascending=False))
+            st.write(numeric_df.corr()['avg_cost_ev'].sort_values(ascending=False))
         else:
-        st.info("avg_cost_ev is not numeric or is missing from numeric columns.")
+            st.info("avg_cost_ev is not numeric or is missing from numeric columns.")
     st.markdown("---")
     st.subheader("Policy Simulator — Multi-Policy")
     st.write("Adjust policy levers (sidebar) then refine here and run prediction.")
