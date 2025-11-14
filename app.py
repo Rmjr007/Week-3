@@ -115,7 +115,7 @@ def call_llm_groq(query, context=""):
     }
 
     payload = {
-        "model": "llama-3.1-70b-versatile",   # ✅ UPDATED MODEL
+        "model": "llama-3.2-90b-text-preview",   # ✅ UPDATED MODEL
         "messages": [
             {"role": "system", "content": "You are an expert EV policy advisor."},
             {"role": "user", "content": f"{query}\n\nDataset context:\n{context}"}
