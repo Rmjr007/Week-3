@@ -1,6 +1,7 @@
 # app.py
 # ============================================================
-#  Core Engine + Globals + Theme + RAG + Groq LLM + Prediction
+#  EV INNOVATE PRO - FULL COMBINED APP
+#  Glassmorphic UI + Groq LLM + TF-IDF RAG + Simulator + Analytics
 # ============================================================
 
 import streamlit as st
@@ -29,7 +30,6 @@ st.set_page_config(
 # ------------------------------------------------------------
 BASE_CSS = """
 <style>
-
 body {
     font-family: 'Inter', sans-serif;
 }
@@ -104,7 +104,6 @@ body {
     border: 1px solid rgba(255,255,255,0.18);
     backdrop-filter: blur(14px);
 }
-
 </style>
 """
 
@@ -118,6 +117,9 @@ if "df" not in st.session_state:
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
 
 if "dark" not in st.session_state:
     st.session_state.dark = False
@@ -186,11 +188,10 @@ def call_llm_groq(query, context=""):
         return f"LLM Error: {e}"
 
 # ------------------------------------------------------------
-# TF-IDF RAG (Semantic Row Retriever)
+# TF-IDF RETRIEVER (RAG)
 # ------------------------------------------------------------
 def build_tfidf_index(df):
     corpus = []
-
     for _, row in df.iterrows():
         text = " | ".join([f"{c}: {row[c]}" for c in df.columns])
         corpus.append(text)
@@ -206,13 +207,11 @@ def get_tfidf(df):
 
 def ai_retrieve(df, query, top_k=3):
     vectorizer, matrix, corpus = get_tfidf(df)
-
     q_vec = vectorizer.transform([query])
     sims = linear_kernel(q_vec, matrix).flatten()
 
     top_idx = sims.argsort()[:-top_k-1:-1]
     retrieved = "\n\n".join([corpus[i] for i in top_idx])
-
     return retrieved
 
 # ------------------------------------------------------------
@@ -236,7 +235,7 @@ def is_ev_dataset(df):
     return all(c.lower() in df_cols for c in EV_COLUMNS)
 
 # ------------------------------------------------------------
-# PREDICTION ENGINE (Linear Regression)
+# PREDICTOR
 # ------------------------------------------------------------
 PRED_FEATURES = list(EV_COLUMNS)
 
@@ -249,17 +248,14 @@ def predict_ev_registration(inputs):
         X = X.apply(pd.to_numeric, errors='coerce').fillna(0)
         X_scaled = scaler.transform(X)
         pred = model.predict(X_scaled)[0]
+        return float(pred), None
 
-# ============================================================
-#  Navigation + Login + Header + Home + Upload System
-# ============================================================
+    except Exception as e:
+        return None, str(e)
 
 # ------------------------------------------------------------
 # LOGIN SYSTEM
 # ------------------------------------------------------------
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
 def login_page():
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
     st.subheader("🔐 Login to Continue")
@@ -276,9 +272,8 @@ def login_page():
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-
 # ------------------------------------------------------------
-# TOP HEADER + THEME SWITCH
+# HEADER + THEME
 # ------------------------------------------------------------
 def top_header():
     st.markdown(
@@ -293,11 +288,9 @@ def top_header():
         unsafe_allow_html=True,
     )
 
-    # Theme toggle
     st.sidebar.markdown("## 🌗 Theme")
     st.session_state.dark = st.sidebar.toggle("Enable Dark Mode", value=False)
 
-    # Apply dark mode
     if st.session_state.dark:
         st.markdown(
             """
@@ -311,9 +304,8 @@ def top_header():
             unsafe_allow_html=True,
         )
 
-
 # ------------------------------------------------------------
-# DATASET UPLOADER
+# UPLOAD DATASET
 # ------------------------------------------------------------
 def upload_dataset():
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
@@ -329,13 +321,12 @@ def upload_dataset():
                 df = pd.read_excel(uploaded)
 
             st.session_state.df = df
-            st.success(f"Uploaded: `{uploaded.name}` — {df.shape[0]} rows, {df.shape[1]} columns")
+            st.success(f"Uploaded: `{uploaded.name}` — {df.shape[0]} rows, {df.shape[1]} cols")
 
         except Exception as e:
             st.error(f"Failed to read file: {e}")
 
     st.markdown("</div>", unsafe_allow_html=True)
-
 
 # ------------------------------------------------------------
 # HOME PAGE
@@ -355,54 +346,16 @@ def home_page():
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Upload section
     upload_dataset()
 
-    # Dataset preview
     if st.session_state.df is not None:
         st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
         st.subheader("👀 Dataset Preview (first 7 rows)")
         st.dataframe(st.session_state.df.head(7), use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-
 # ------------------------------------------------------------
-# NAVIGATION MENU
-# ------------------------------------------------------------
-def navigation_menu():
-    menu = st.sidebar.radio(
-        "📌 Navigation",
-        ["Home", "Analytics", "Simulator", "AI Assistant", "Settings"],
-    )
-    return menu
-
-
-# ------------------------------------------------------------
-# SETTINGS PAGE
-# ------------------------------------------------------------
-def settings_page():
-    top_header()
-    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-    st.subheader("⚙️ Settings")
-
-    st.write("Adjust application preferences below:")
-    st.write("- Toggle theme in the sidebar")
-    st.write("- Model status:")
-    st.code(model_status)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-        return float(pred), None
-    except Exception as e:
-        return None, str(e)
-
-# ============================================================
-#  Analytics + Simulator + AI Assistant + Routing
-# ============================================================
-
-# ------------------------------------------------------------
-# ANALYTICS — EV-SPECIFIC KPI CARDS
+# ANALYTICS — KPI CARDS
 # ------------------------------------------------------------
 def ev_kpi_cards(df):
     col1, col2, col3, col4 = st.columns(4)
@@ -427,7 +380,6 @@ def ev_kpi_cards(df):
         st.markdown(f"<div class='kpi-card'><div class='kpi-number'>${inc:,.0f}</div>"
                     "<div class='kpi-label'>Avg Incentive</div></div>", unsafe_allow_html=True)
 
-
 # ------------------------------------------------------------
 # ANALYTICS PAGE
 # ------------------------------------------------------------
@@ -449,7 +401,6 @@ def analytics_page():
     if is_ev_dataset(df):
         st.success("EV dataset detected — Showing EV-specific analytics")
 
-        # KPI Cards
         ev_kpi_cards(df)
 
         st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
@@ -464,9 +415,8 @@ def analytics_page():
             st.plotly_chart(fig, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Correlation
         st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.subheader("📉 Correlation Heatmap (Numeric Columns)")
+        st.subheader("📉 Correlation Heatmap")
         num = df.select_dtypes(include=[np.number])
         fig, ax = plt.subplots(figsize=(8, 4))
         sns.heatmap(num.corr(), cmap="Greens", annot=False, ax=ax)
@@ -474,20 +424,18 @@ def analytics_page():
         st.markdown("</div>", unsafe_allow_html=True)
 
     else:
-        st.warning("Non-EV dataset detected — Using generic analytics.")
-
-        # Numeric histogram
-        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.subheader("📈 Example Visualization")
+        st.warning("Generic dataset detected.")
         num = df.select_dtypes(include=[np.number])
         col = num.columns[0]
+
+        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+        st.subheader("📈 Histogram")
         fig = px.histogram(df, x=col)
         st.plotly_chart(fig, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-
 # ------------------------------------------------------------
-# POLICY SIMULATOR
+# SIMULATOR PAGE
 # ------------------------------------------------------------
 def simulator_page():
     top_header()
@@ -500,13 +448,9 @@ def simulator_page():
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
     st.subheader("🛠️ EV Policy Simulator — Multi-Policy Model")
 
-    # Defaults
-    defaults = {
-        c: float(df[c].mean()) if c in df else 0 for c in PRED_FEATURES
-    }
-
-    # UI Inputs
+    defaults = {c: float(df[c].mean()) if c in df else 0 for c in PRED_FEATURES}
     sim_inputs = {}
+
     for k in PRED_FEATURES:
         sim_inputs[k] = st.number_input(k, value=defaults[k])
 
@@ -520,9 +464,8 @@ def simulator_page():
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-
 # ------------------------------------------------------------
-# AI ASSISTANT — GLASS CHAT + GROQ LLM + TF-IDF RAG
+# AI ASSISTANT PAGE
 # ------------------------------------------------------------
 def ai_assistant_page():
     top_header()
@@ -535,7 +478,7 @@ def ai_assistant_page():
 
     st.subheader("🤖 AI Assistant (Glass UI + Groq LLM)")
 
-    # Chat history bubbles
+    # Chat history
     for role, msg in st.session_state.chat_history:
         if role == "user":
             st.markdown(f"<div class='chat-bubble-user'>{msg}</div>",
@@ -544,50 +487,57 @@ def ai_assistant_page():
             st.markdown(f"<div class='chat-bubble-bot'>{msg}</div>",
                         unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Input
-    query = st.text_input("Ask a question:")
+    query = st.text_input("Ask something about your dataset:")
 
     if st.button("Ask"):
-        # Retrieve rows
         context = ai_retrieve(df, query, top_k=3)
-
-        # LLM answer
         answer = call_llm_groq(query, context)
 
-        # Add to chat
         st.session_state.chat_history.append(("user", query))
         st.session_state.chat_history.append(("bot", answer))
 
-        # Display live
-        st.markdown(f"<div class='chat-bubble-user'>{query}</div>",
-                    unsafe_allow_html=True)
-        st.markdown(f"<div class='chat-bubble-bot'>{answer}</div>",
-                    unsafe_allow_html=True)
+        st.markdown(f"<div class='chat-bubble-user'>{query}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='chat-bubble-bot'>{answer}</div>", unsafe_allow_html=True)
 
-        st.subheader("📄 Dataset Context Used")
+        st.subheader("📄 Dataset Context")
         st.code(context)
 
     if st.button("Clear Chat"):
         st.session_state.chat_history = []
 
+# ------------------------------------------------------------
+# SETTINGS PAGE
+# ------------------------------------------------------------
+def settings_page():
+    top_header()
+
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.subheader("⚙️ Settings")
+    st.write("- Toggle theme from the sidebar")
+    st.write("- Model status:")
+    st.code(model_status)
     st.markdown("</div>", unsafe_allow_html=True)
 
+# ------------------------------------------------------------
+# NAVIGATION MENU
+# ------------------------------------------------------------
+def navigation_menu():
+    menu = st.sidebar.radio(
+        "📌 Navigation",
+        ["Home", "Analytics", "Simulator", "AI Assistant", "Settings"],
+    )
+    return menu
 
 # ------------------------------------------------------------
-# MAIN ROUTER
+# MAIN APP ROUTER
 # ------------------------------------------------------------
 def main():
-    # If user not logged in → show login
     if not st.session_state.logged_in:
         login_page()
         return
 
-    # Navigation
     page = navigation_menu()
 
-    # Routing
     if page == "Home":
         home_page()
     elif page == "Analytics":
@@ -599,7 +549,6 @@ def main():
     elif page == "Settings":
         settings_page()
 
-    # Footer
     st.markdown(
         "<div style='text-align:center; margin-top:30px; opacity:0.6;'>"
         "EV Innovate Pro © 2025 — Powered by Streamlit + Groq LLM"
@@ -607,7 +556,5 @@ def main():
         unsafe_allow_html=True,
     )
 
-
-# Run the app
 if __name__ == "__main__":
     main()
