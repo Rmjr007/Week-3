@@ -118,18 +118,33 @@ def call_llm_groq(query, context=""):
         "model": "llama3-70b-8192",
         "messages": [
             {"role": "system", "content": "You are an expert EV policy advisor."},
-            {"role": "user", "content": f"Question: {query}\n\nDataset Context:\n{context}"}
+            {"role": "user", "content": f"{query}\n\nDataset context:\n{context}"}
         ],
         "temperature": 0.25
     }
 
     try:
         response = requests.post(url, headers=headers, json=payload)
+
+        # Convert to JSON
         data = response.json()
+
+        # 🔥 DEBUG print (optional)
+        # st.write(data)
+
+        # If Groq returned an error object:
+        if "error" in data:
+            return f"⚠️ Groq Error: {data['error'].get('message', 'Unknown error')}"
+
+        # If choices missing:
+        if "choices" not in data:
+            return f"⚠️ Unexpected Groq response: {data}"
+
         return data["choices"][0]["message"]["content"]
 
     except Exception as e:
         return f"LLM Error: {e}"
+
 
 # ------------------------------------------------------------
 # TF-IDF Retriever
