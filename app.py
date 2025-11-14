@@ -1,6 +1,7 @@
 # app.py
 # ============================================================
 #  EV INNOVATE PRO — FINAL RENDER-STABLE VERSION (GROQ FIXED)
+#  Using requests (NO Groq SDK, NO proxies, NO errors)
 # ============================================================
 
 import streamlit as st
@@ -8,9 +9,7 @@ import pandas as pd
 import numpy as np
 import joblib
 import os
-
-# *** FIXED GROQ IMPORT ***
-from groq import Client
+import requests   # <---- NEW: Using requests instead of Groq SDK
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
@@ -29,7 +28,7 @@ st.set_page_config(
 )
 
 # ------------------------------------------------------------
-# Glassmorphism CSS
+# CSS Styling (Glassmorphism)
 # ------------------------------------------------------------
 st.markdown("""
 <style>
@@ -70,7 +69,7 @@ body { font-family: 'Inter', sans-serif; }
 # ------------------------------------------------------------
 if "df" not in st.session_state: st.session_state.df = None
 if "chat_history" not in st.session_state: st.session_state.chat_history = []
-if "logged_in" not in st.session_state: st.session_state.logged_in = False
+if "logged_in" not in st.session_state: st.session_state.logged_logged_in = False
 
 # ------------------------------------------------------------
 # Load Model & Scaler
@@ -101,28 +100,33 @@ def load_model_scaler():
 model, scaler, model_status = load_model_scaler()
 
 # ------------------------------------------------------------
-# FIXED Groq LLM (NO PROXIES)
+# 🔥 FIXED GROQ LLM FUNCTION (USING REQUESTS)
 # ------------------------------------------------------------
 def call_llm_groq(query, context=""):
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         return "❌ GROQ_API_KEY missing."
 
+    url = "https://api.groq.com/openai/v1/chat/completions"
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": "llama3-70b-8192",
+        "messages": [
+            {"role": "system", "content": "You are an expert EV policy advisor."},
+            {"role": "user", "content": f"Question: {query}\n\nDataset Context:\n{context}"}
+        ],
+        "temperature": 0.25
+    }
+
     try:
-        client = Client(api_key=api_key)    # FIXED — no proxies
-
-        response = client.chat.completions.create(
-            model="llama3-70b-8192",
-            messages=[
-                {"role": "system", 
-                 "content": "You are an EV policy expert. Use the dataset context to answer."},
-                {"role": "user", 
-                 "content": f"User Question: {query}\n\nDataset Context:\n{context}"}
-            ],
-            temperature=0.25
-        )
-
-        return response.choices[0].message["content"]
+        response = requests.post(url, headers=headers, json=payload)
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
 
     except Exception as e:
         return f"LLM Error: {e}"
@@ -148,7 +152,7 @@ def ai_retrieve(df, query, top_k=3):
     return "\n\n".join([corpus[i] for i in top_idx])
 
 # ------------------------------------------------------------
-# EV Feature Definitions (Target Removed)
+# EV Prediction Feature List
 # ------------------------------------------------------------
 PRED_FEATURES = [
     "total_vehicles_registered",
@@ -167,7 +171,7 @@ def is_ev_dataset(df):
     return all(f.lower() in df_cols for f in PRED_FEATURES)
 
 # ------------------------------------------------------------
-# Prediction Function
+# Prediction
 # ------------------------------------------------------------
 def predict_ev(inputs):
     if model is None or scaler is None:
@@ -220,6 +224,7 @@ def header():
 # ------------------------------------------------------------
 def home_page():
     header()
+
     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
     st.subheader("📂 Upload Dataset")
 
@@ -234,7 +239,7 @@ def home_page():
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# KPI CARDS
+# KPI SECTION
 # ------------------------------------------------------------
 def ev_kpi(df):
     col1, col2, col3 = st.columns(3)
@@ -249,7 +254,7 @@ def ev_kpi(df):
         st.markdown(f"<div class='kpi-card'><div class='kpi-number'>${df['avg_cost_ev'].mean():,.0f}</div><div class='kpi-label'>Avg EV Cost</div></div>", unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# ANALYTICS
+# ANALYTICS PAGE
 # ------------------------------------------------------------
 def analytics_page():
     header()
@@ -279,7 +284,7 @@ def analytics_page():
         st.info("Generic dataset detected.")
 
 # ------------------------------------------------------------
-# SIMULATOR
+# SIMULATOR PAGE
 # ------------------------------------------------------------
 def simulator_page():
     header()
@@ -310,31 +315,32 @@ def simulator_page():
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# AI ASSISTANT
+# AI ASSISTANT PAGE
 # ------------------------------------------------------------
 def ai_page():
     header()
 
     if st.session_state.df is None:
-        st.warning("Upload dataset first.")
+        st.warning("Upload a dataset first.")
         return
 
     df = st.session_state.df
 
-    st.subheader("🤖 AI Assistant (Groq + RAG)")
+    st.subheader("🤖 AI Assistant (Groq + Retriever)")
 
     for role, msg in st.session_state.chat_history:
         bubble = "chat-bubble-user" if role == "user" else "chat-bubble-bot"
         st.markdown(f"<div class='{bubble}'>{msg}</div>", unsafe_allow_html=True)
 
-    question = st.text_input("Ask a question about your dataset:")
+    question = st.text_input("Ask something about your dataset:")
 
     if st.button("Ask"):
-        ctx = ai_retrieve(df, question)
-        answer = call_llm_groq(question, ctx)
+        context = ai_retrieve(df, question)
+        answer = call_llm_groq(question, context)
 
         st.session_state.chat_history.append(("user", question))
         st.session_state.chat_history.append(("bot", answer))
+
         st.experimental_rerun()
 
     if st.button("Clear Chat"):
@@ -342,7 +348,7 @@ def ai_page():
         st.experimental_rerun()
 
 # ------------------------------------------------------------
-# SETTINGS
+# SETTINGS PAGE
 # ------------------------------------------------------------
 def settings_page():
     header()
@@ -353,12 +359,15 @@ def settings_page():
 # NAVIGATION
 # ------------------------------------------------------------
 def navigation():
-    return st.sidebar.radio("📌 Menu", ["Home", "Analytics", "Simulator", "AI Assistant", "Settings"])
+    return st.sidebar.radio("📌 Menu", ["Home", "Analysis", "Simulator", "AI Assistant", "Settings"])
 
 # ------------------------------------------------------------
 # MAIN
 # ------------------------------------------------------------
 def main():
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+
     if not st.session_state.logged_in:
         login_page()
         return
@@ -366,7 +375,7 @@ def main():
     page = navigation()
 
     if page == "Home": home_page()
-    elif page == "Analytics": analytics_page()
+    elif page == "Analysis": analytics_page()
     elif page == "Simulator": simulator_page()
     elif page == "AI Assistant": ai_page()
     elif page == "Settings": settings_page()
