@@ -115,7 +115,7 @@ def call_llm_groq(query, context=""):
     }
 
     payload = {
-        "model": "llama3-70b-8192",
+        "model": "llama-3.1-70b-versatile",   # ✅ UPDATED MODEL
         "messages": [
             {"role": "system", "content": "You are an expert EV policy advisor."},
             {"role": "user", "content": f"{query}\n\nDataset context:\n{context}"}
@@ -125,18 +125,11 @@ def call_llm_groq(query, context=""):
 
     try:
         response = requests.post(url, headers=headers, json=payload)
-
-        # Convert to JSON
         data = response.json()
 
-        # 🔥 DEBUG print (optional)
-        # st.write(data)
-
-        # If Groq returned an error object:
         if "error" in data:
             return f"⚠️ Groq Error: {data['error'].get('message', 'Unknown error')}"
 
-        # If choices missing:
         if "choices" not in data:
             return f"⚠️ Unexpected Groq response: {data}"
 
@@ -144,6 +137,7 @@ def call_llm_groq(query, context=""):
 
     except Exception as e:
         return f"LLM Error: {e}"
+
 
 
 # ------------------------------------------------------------
