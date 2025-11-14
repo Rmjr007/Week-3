@@ -1,202 +1,226 @@
 # app.py
-"""
-EV Innovate - Full-featured Streamlit dashboard (Option C: Green EV Theme)
-Features:
- - Top navigation (Home, Analytics, AI Assistant, Simulator, Settings)
- - Login (demo)
- - Upload CSV/XLSX
- - Hybrid Analytics: EV-specific + dynamic analytics
- - Dataset health, missing heatmap, column profiling
- - Policy Simulator (multi-policy) + prediction using Linear Regression
- - TF-IDF based AI Assistant (dataset retriever) with chat UI
- - Dark/Light theme toggle
-Notes:
- - Place model/scaler in ./models/ev_policy_best_model.pkl and ./models/scaler.pkl
- - Required libs: streamlit, pandas, numpy, scikit-learn, joblib, plotly, matplotlib,
-   seaborn, sklearn, statsmodels (if using trendline), scipy pinned per instructions.
-"""
+# ============================================================
+#  Core Engine + Globals + Theme + RAG + Groq LLM + Prediction
+# ============================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
 import os
-import io
-from typing import Tuple, Dict
+from groq import Groq
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 import plotly.express as px
 import matplotlib.pyplot as plt
+import seaborn as sns
 
-# ----------------------------
-# Config & paths
-# ----------------------------
-st.set_page_config(page_title="EV Innovate – Dashboard",
-                   page_icon="⚡", layout="wide", initial_sidebar_state="collapsed")
+# ------------------------------------------------------------
+# Streamlit Page Setup
+# ------------------------------------------------------------
+st.set_page_config(
+    page_title="EV Innovate Pro – Green Policy Simulator",
+    page_icon="⚡",
+    layout="wide",
+)
 
+# ------------------------------------------------------------
+# GLOBAL THEME (Glassmorphism + Green Gradient Pro UI)
+# ------------------------------------------------------------
+BASE_CSS = """
+<style>
+
+body {
+    font-family: 'Inter', sans-serif;
+}
+
+.header-bar {
+    background: linear-gradient(90deg, #0f9d58, #34a853);
+    padding: 22px;
+    border-radius: 18px;
+    color: white;
+    font-weight: 700;
+    font-size: 26px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+    margin-bottom: 20px;
+}
+
+/* Glass Cards */
+.glass-card {
+    background: rgba(255,255,255,0.12);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: 20px;
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.15);
+    margin-bottom: 20px;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.15);
+}
+
+/* KPI Cards */
+.kpi-card {
+    padding: 20px;
+    text-align: center;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.15);
+    color: white;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+}
+
+.kpi-number {
+    font-size: 34px;
+    font-weight: 800;
+}
+
+.kpi-label {
+    font-size: 13px;
+    opacity: 0.85;
+}
+
+/* Chat Bubbles */
+.chat-bubble-user {
+    background: rgba(52,168,83,0.35);
+    padding: 14px;
+    border-radius: 14px;
+    margin: 8px 0;
+    width: 80%;
+    margin-left: 20%;
+    color: white;
+    font-weight: 500;
+    backdrop-filter: blur(14px);
+}
+
+.chat-bubble-bot {
+    background: rgba(255,255,255,0.10);
+    padding: 14px;
+    border-radius: 14px;
+    margin: 8px 0;
+    width: 80%;
+    margin-right: 20%;
+    color: white;
+    font-weight: 500;
+    border: 1px solid rgba(255,255,255,0.18);
+    backdrop-filter: blur(14px);
+}
+
+</style>
+"""
+
+st.markdown(BASE_CSS, unsafe_allow_html=True)
+
+# ------------------------------------------------------------
+# SESSION STATE DEFAULTS
+# ------------------------------------------------------------
+if "df" not in st.session_state:
+    st.session_state.df = None
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+if "dark" not in st.session_state:
+    st.session_state.dark = False
+
+# ------------------------------------------------------------
+# MODEL & SCALER LOADER
+# ------------------------------------------------------------
 MODEL_PATH = "models/ev_policy_best_model.pkl"
 SCALER_PATH = "models/scaler.pkl"
 
-# ----------------------------
-# Theme CSS (Green Gradient)
-# ----------------------------
-BASE_CSS = """
-<style>
-:root {
-  --card-radius: 12px;
-  --glass: rgba(255,255,255,0.03);
-}
-body { font-family: "Inter", sans-serif; }
-.header {
-  background: linear-gradient(90deg, #0f9d58, #34a853);
-  color: white;
-  padding: 18px 28px;
-  border-radius: 12px;
-  box-shadow: 0 6px 18px rgba(10,10,10,0.08);
-}
-.header-title { font-size: 28px; font-weight:700; margin:0; }
-.header-sub { margin:0; opacity:0.95; }
-.upload-box {
-  border: 2px dashed rgba(255,255,255,0.08);
-  padding: 28px;
-  border-radius: 12px;
-  text-align: center;
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-}
-.card {
-  background: white;
-  padding: 14px;
-  border-radius: var(--card-radius);
-  box-shadow: 0 6px 18px rgba(12,16,20,0.04);
-}
-.dark .card {
-  background: #081217;
-  color: #e6eef6;
-  border: 1px solid rgba(255,255,255,0.03);
-}
-.kpi {
-  font-size: 26px;
-  font-weight: 800;
-  margin-bottom: 6px;
-}
-.kpi-sub { color: #6b7280; font-size:12px; }
-.small { color:#6b7280; font-size:12px; }
-.footer { color:#a0a8b5; font-size:12px; margin-top:18px; }
-</style>
-"""
-
-DARK_OVERRIDES = """
-<style>
-body { background: #071018; color: #e6eef6; }
-</style>
-"""
-
-# ----------------------------
-# Session state defaults
-# ----------------------------
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "df" not in st.session_state:
-    st.session_state.df = None
-if "dark_mode" not in st.session_state:
-    st.session_state.dark_mode = True
-if "tfidf" not in st.session_state:
-    st.session_state.tfidf = None
-if "tfidf_matrix" not in st.session_state:
-    st.session_state.tfidf_matrix = None
-if "corpus" not in st.session_state:
-    st.session_state.corpus = None
-
-# ----------------------------
-# Utility: load model + scaler
-# ----------------------------
 @st.cache_resource
-def load_model_and_scaler() -> Tuple[object, object, str]:
-    model = None
-    scaler = None
+def load_model_and_scaler():
+    model = scaler = None
     msg = ""
+
     if os.path.exists(MODEL_PATH):
         try:
             model = joblib.load(MODEL_PATH)
             msg += "Model loaded. "
         except Exception as e:
-            msg += f"Failed to load model: {e}. "
-    else:
-        msg += f"No model at {MODEL_PATH}. "
+            msg += f"Model error: {e}. "
+
     if os.path.exists(SCALER_PATH):
         try:
             scaler = joblib.load(SCALER_PATH)
             msg += "Scaler loaded."
         except Exception as e:
-            msg += f"Failed to load scaler: {e}."
-    else:
-        msg += f"No scaler at {SCALER_PATH}."
+            msg += f"Scaler error: {e}. "
+
     return model, scaler, msg
 
 model, scaler, model_status = load_model_and_scaler()
 
-# ----------------------------
-# Small helpers
-# ----------------------------
-def safe_display_df(df: pd.DataFrame, n=5):
-    """Return safe truncated df for display (avoid huge output)."""
-    return df.head(n)
+# ------------------------------------------------------------
+# GROQ LLM (Llama-3.1 70B)
+# ------------------------------------------------------------
+def call_llm_groq(query, context=""):
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return "❌ GROQ_API_KEY missing in environment variables."
 
-def guess_year_column(df: pd.DataFrame):
-    for c in df.columns:
-        if "year" in c.lower() or "date" in c.lower():
-            return c
-    return None
+    try:
+        client = Groq(api_key=api_key)
 
-def ev_likeness_score(df: pd.DataFrame) -> float:
-    ev_keywords = {"ev", "electric", "charging", "co2", "incentive", "stations", "vehicles", "percentage", "registered"}
-    score = 0
-    for col in df.columns:
-        for kw in ev_keywords:
-            if kw in col.lower():
-                score += 1
-    # normalized to percent of columns
-    return round((score / max(1, len(df.columns))) * 100, 2)
+        response = client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an EV policy expert and data analyst. "
+                        "Use the dataset context to generate meaningful insights."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"Question: {query}\n\nDataset Context:\n{context}"
+                }
+            ],
+            temperature=0.25
+        )
 
-def build_tfidf_index(df: pd.DataFrame):
+        return response.choices[0].message["content"]
+
+    except Exception as e:
+        return f"LLM Error: {e}"
+
+# ------------------------------------------------------------
+# TF-IDF RAG (Semantic Row Retriever)
+# ------------------------------------------------------------
+def build_tfidf_index(df):
     corpus = []
+
     for _, row in df.iterrows():
-        parts = []
-        for c in df.columns:
-            try:
-                parts.append(f"{c}: {row[c]}")
-            except Exception:
-                parts.append(f"{c}: ")
-        corpus.append(" | ".join(parts))
-    tfidf = TfidfVectorizer(stop_words="english", max_features=3000)
-    mat = tfidf.fit_transform(corpus)
-    return tfidf, mat, corpus
+        text = " | ".join([f"{c}: {row[c]}" for c in df.columns])
+        corpus.append(text)
 
-def ai_query(q: str, top_k: int = 3) -> str:
-    if st.session_state.df is None:
-        return "Please upload a dataset first."
-    if st.session_state.tfidf is None:
-        tfidf, mat, corpus = build_tfidf_index(st.session_state.df)
-        st.session_state.tfidf = tfidf
-        st.session_state.tfidf_matrix = mat
-        st.session_state.corpus = corpus
-    tfidf = st.session_state.tfidf
-    mat = st.session_state.tfidf_matrix
-    corpus = st.session_state.corpus
-    qv = tfidf.transform([q])
-    sims = linear_kernel(qv, mat).flatten()
-    idx = sims.argsort()[:-top_k-1:-1]
-    results = []
-    for i in idx:
-        if sims[i] > 0:
-            results.append(f"Score {sims[i]:.2f} → {corpus[i]}")
-    return "\n\n".join(results) if results else "No similar rows found."
+    vectorizer = TfidfVectorizer(stop_words="english")
+    matrix = vectorizer.fit_transform(corpus)
 
-# ----------------------------
-# Prediction util (uses exact model features)
-# ----------------------------
-MODEL_FEATURES = [
+    return vectorizer, matrix, corpus
+
+@st.cache_resource
+def get_tfidf(df):
+    return build_tfidf_index(df)
+
+def ai_retrieve(df, query, top_k=3):
+    vectorizer, matrix, corpus = get_tfidf(df)
+
+    q_vec = vectorizer.transform([query])
+    sims = linear_kernel(q_vec, matrix).flatten()
+
+    top_idx = sims.argsort()[:-top_k-1:-1]
+    retrieved = "\n\n".join([corpus[i] for i in top_idx])
+
+    return retrieved
+
+# ------------------------------------------------------------
+# EV DETECTION
+# ------------------------------------------------------------
+EV_COLUMNS = {
     "total_vehicles_registered",
+    "ev_vehicles_registered",
     "ev_percentage_share",
     "charging_stations_count",
     "avg_cost_ev",
@@ -205,383 +229,385 @@ MODEL_FEATURES = [
     "co2_emissions_per_vehicle",
     "fuel_price_per_liter",
     "electricity_price_per_kWh"
-]
+}
 
-def predict_with_model(input_map: Dict[str, float]):
+def is_ev_dataset(df):
+    df_cols = set([c.lower() for c in df.columns])
+    return all(c.lower() in df_cols for c in EV_COLUMNS)
+
+# ------------------------------------------------------------
+# PREDICTION ENGINE (Linear Regression)
+# ------------------------------------------------------------
+PRED_FEATURES = list(EV_COLUMNS)
+
+def predict_ev_registration(inputs):
     if model is None or scaler is None:
-        return None, "Model or scaler not present."
-    # Build row with exact order
-    row = {k: input_map.get(k, 0.0) for k in MODEL_FEATURES}
-    X = pd.DataFrame([row])[MODEL_FEATURES]
-    # Ensure numeric dtype
-    X = X.apply(pd.to_numeric, errors='coerce').fillna(0.0)
+        return None, "Model or scaler missing."
+
     try:
-        Xs = scaler.transform(X)
-    except Exception as e:
-        return None, f"Scaler transform error: {e}"
-    try:
-        pred = model.predict(Xs)[0]
-        return float(pred), None
-    except Exception as e:
-        return None, f"Model prediction error: {e}"
+        X = pd.DataFrame([inputs])[PRED_FEATURES]
+        X = X.apply(pd.to_numeric, errors='coerce').fillna(0)
+        X_scaled = scaler.transform(X)
+        pred = model.predict(X_scaled)[0]
 
-# ----------------------------
-# Dataset health & profiling helpers
-# ----------------------------
-def dataset_health_cards(df: pd.DataFrame):
-    total_rows = int(len(df))
-    total_cols = int(len(df.columns))
-    missing = int(df.isnull().sum().sum())
-    dupes = int(df.duplicated().sum())
-    numeric_count = int(len(df.select_dtypes(include=[np.number]).columns))
-    categorical_count = int(len(df.select_dtypes(include=['object', 'category']).columns))
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Rows", total_rows)
-    c2.metric("Columns", total_cols)
-    c3.metric("Missing values", missing)
-    c4, c5 = st.columns(2)
-    c4.metric("Duplicate rows", dupes)
-    c5.metric("Numeric columns", numeric_count)
-    st.caption(f"Categorical columns: {categorical_count}")
+# ============================================================
+#  Navigation + Login + Header + Home + Upload System
+# ============================================================
 
-def missing_heatmap(df: pd.DataFrame):
-    import seaborn as sns
-    fig, ax = plt.subplots(figsize=(10, 3))
-    sns.heatmap(df.isnull(), cbar=False, cmap="Blues", ax=ax)
-    ax.set_xlabel("")
-    st.pyplot(fig)
+# ------------------------------------------------------------
+# LOGIN SYSTEM
+# ------------------------------------------------------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
 
-def column_profile(df: pd.DataFrame):
-    info = pd.DataFrame({
-        "column": df.columns,
-        "dtype": [str(df[c].dtype) for c in df.columns],
-        "missing_%": [round(df[c].isnull().mean() * 100, 2) for c in df.columns],
-        "unique": [int(df[c].nunique(dropna=True)) for c in df.columns]
-    })
-    st.dataframe(info, use_container_width=True)
+def login_page():
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.subheader("🔐 Login to Continue")
 
-def suggested_visualizations(df: pd.DataFrame):
-    numeric = df.select_dtypes(include=[np.number]).columns.tolist()
-    st.subheader("Suggested visualizations")
-    if len(numeric) >= 1:
-        col = numeric[0]
-        st.write(f"Distribution of **{col}**")
-        fig = px.histogram(df, x=col, nbins=30)
-        st.plotly_chart(fig, use_container_width=True)
-    if len(numeric) >= 2:
-        st.write(f"Scatter: **{numeric[0]}** vs **{numeric[1]}**")
-        fig = px.scatter(df, x=numeric[0], y=numeric[1])
-        st.plotly_chart(fig, use_container_width=True)
+    user = st.text_input("Username")
+    pwd = st.text_input("Password", type="password")
 
-# ----------------------------
-# UI: Login & header
-# ----------------------------
-def login_box():
-    st.sidebar.markdown("## 🔒 Login (demo)")
-    u = st.sidebar.text_input("Username")
-    p = st.sidebar.text_input("Password", type="password")
-    if st.sidebar.button("Login"):
-        if u == "admin" and p == "password":
+    if st.button("Login"):
+        if user == "admin" and pwd == "password":
             st.session_state.logged_in = True
-            st.sidebar.success("Logged in as admin")
+            st.success("Login successful!")
         else:
-            st.sidebar.error("Invalid credentials (demo: admin/password)")
+            st.error("Invalid credentials.")
 
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ------------------------------------------------------------
+# TOP HEADER + THEME SWITCH
+# ------------------------------------------------------------
 def top_header():
-    st.markdown(BASE_CSS, unsafe_allow_html=True)
-    if st.session_state.dark_mode:
-        st.markdown(DARK_OVERRIDES, unsafe_allow_html=True)
-        st.markdown('<div class="header"><div style="display:flex;justify-content:space-between;align-items:center;"><div><p class="header-title">EV Innovate</p><p class="header-sub">Green Policy Simulator & EV Analytics</p></div><div style="text-align:right"><small>Model status:</small><br><strong>'+model_status+'</strong></div></div></div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="header"><div style="display:flex;justify-content:space-between;align-items:center;"><div><p class="header-title">EV Innovate</p><p class="header-sub">Green Policy Simulator & EV Analytics</p></div><div style="text-align:right"><small>Model status:</small><br><strong>'+model_status+'</strong></div></div></div>', unsafe_allow_html=True)
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="header-bar">
+            EV Innovate Pro — Green Policy Simulator
+            <div style='font-size:14px; font-weight:400; opacity:0.85;'>
+                {model_status}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-# ----------------------------
-# Upload area
-# ----------------------------
-def upload_area():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("### Upload dataset (CSV or Excel)")
-    uploaded = st.file_uploader("", type=["csv", "xlsx"])
-    if uploaded is not None:
+    # Theme toggle
+    st.sidebar.markdown("## 🌗 Theme")
+    st.session_state.dark = st.sidebar.toggle("Enable Dark Mode", value=False)
+
+    # Apply dark mode
+    if st.session_state.dark:
+        st.markdown(
+            """
+            <style>
+            body {
+                background-color: #0b1116 !important;
+                color: #e8f0f7 !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+# ------------------------------------------------------------
+# DATASET UPLOADER
+# ------------------------------------------------------------
+def upload_dataset():
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.subheader("📂 Upload Dataset")
+
+    uploaded = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"])
+
+    if uploaded:
         try:
-            if str(uploaded.name).lower().endswith(".csv"):
+            if uploaded.name.endswith(".csv"):
                 df = pd.read_csv(uploaded)
             else:
                 df = pd.read_excel(uploaded)
+
             st.session_state.df = df
-            st.success(f"Loaded `{uploaded.name}` — rows: {df.shape[0]}, cols: {df.shape[1]}")
+            st.success(f"Uploaded: `{uploaded.name}` — {df.shape[0]} rows, {df.shape[1]} columns")
+
         except Exception as e:
-            st.error(f"Failed to load file: {e}")
-    else:
-        st.info("No file uploaded. Use sample dataset or upload your own CSV/Excel.")
-    st.markdown('</div>', unsafe_allow_html=True)
+            st.error(f"Failed to read file: {e}")
 
-# ----------------------------
-# Sidebar: theme toggle + help
-# ----------------------------
-def sidebar_area():
-    st.sidebar.markdown("## Controls")
-    st.sidebar.checkbox("Dark theme", value=st.session_state.dark_mode, key="theme_toggle")
-    st.session_state.dark_mode = st.session_state.theme_toggle
-    login_box()
-    with st.sidebar.expander("❓ How to use"):
-        st.write("""
-- Upload any CSV/Excel dataset.
-- If your data contains EV-specific columns the EV dashboard activates.
-- Use the Policy Simulator to create scenarios and predict EV registrations.
-- Visit AI Assistant to ask data questions (retrieval-based).
-""")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# ----------------------------
-# Hybrid analytics page (complete)
-# ----------------------------
+
+# ------------------------------------------------------------
+# HOME PAGE
+# ------------------------------------------------------------
+def home_page():
+    top_header()
+
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.subheader("🏠 Home — Welcome to EV Innovate Pro")
+
+    st.write("""
+    - Upload a dataset to begin analysis  
+    - Access EV-specific and generic analytics  
+    - Simulate policy scenarios  
+    - Interact with the AI Assistant  
+    """)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Upload section
+    upload_dataset()
+
+    # Dataset preview
+    if st.session_state.df is not None:
+        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+        st.subheader("👀 Dataset Preview (first 7 rows)")
+        st.dataframe(st.session_state.df.head(7), use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ------------------------------------------------------------
+# NAVIGATION MENU
+# ------------------------------------------------------------
+def navigation_menu():
+    menu = st.sidebar.radio(
+        "📌 Navigation",
+        ["Home", "Analytics", "Simulator", "AI Assistant", "Settings"],
+    )
+    return menu
+
+
+# ------------------------------------------------------------
+# SETTINGS PAGE
+# ------------------------------------------------------------
+def settings_page():
+    top_header()
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.subheader("⚙️ Settings")
+
+    st.write("Adjust application preferences below:")
+    st.write("- Toggle theme in the sidebar")
+    st.write("- Model status:")
+    st.code(model_status)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+        return float(pred), None
+    except Exception as e:
+        return None, str(e)
+
+# ============================================================
+#  Analytics + Simulator + AI Assistant + Routing
+# ============================================================
+
+# ------------------------------------------------------------
+# ANALYTICS — EV-SPECIFIC KPI CARDS
+# ------------------------------------------------------------
+def ev_kpi_cards(df):
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        val = int(df["ev_vehicles_registered"].sum()) if "ev_vehicles_registered" in df else 0
+        st.markdown(f"<div class='kpi-card'><div class='kpi-number'>{val:,}</div>"
+                    "<div class='kpi-label'>Total EV Registrations</div></div>", unsafe_allow_html=True)
+
+    with col2:
+        cost = float(df["avg_cost_ev"].mean()) if "avg_cost_ev" in df else 0
+        st.markdown(f"<div class='kpi-card'><div class='kpi-number'>${cost:,.0f}</div>"
+                    "<div class='kpi-label'>Avg EV Cost</div></div>", unsafe_allow_html=True)
+
+    with col3:
+        stns = int(df["charging_stations_count"].sum()) if "charging_stations_count" in df else 0
+        st.markdown(f"<div class='kpi-card'><div class='kpi-number'>{stns:,}</div>"
+                    "<div class='kpi-label'>Charging Stations</div></div>", unsafe_allow_html=True)
+
+    with col4:
+        inc = float(df["gov_incentive_amount"].mean()) if "gov_incentive_amount" in df else 0
+        st.markdown(f"<div class='kpi-card'><div class='kpi-number'>${inc:,.0f}</div>"
+                    "<div class='kpi-label'>Avg Incentive</div></div>", unsafe_allow_html=True)
+
+
+# ------------------------------------------------------------
+# ANALYTICS PAGE
+# ------------------------------------------------------------
 def analytics_page():
+    top_header()
+
     if st.session_state.df is None:
-        st.info("Upload a dataset on Home to view analytics.")
+        st.warning("Please upload a dataset first.")
         return
 
     df = st.session_state.df.copy()
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("Dataset Health Overview")
-    dataset_health_cards(df)
 
-    # EV-likeness and quick stats
-    score = ev_likeness_score(df)
-    st.info(f"EV-likeness score: **{score}%**")
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.subheader("📊 Dataset Summary")
+    st.write(df.describe(include="all"))
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    # column profile & missing heatmap collapsible
-    with st.expander("Column profile & missing values"):
-        column_profile(df)
-        if df.isnull().sum().sum() > 0:
-            missing_heatmap(df)
-        else:
-            st.success("No missing values detected.")
+    # EV or Generic?
+    if is_ev_dataset(df):
+        st.success("EV dataset detected — Showing EV-specific analytics")
 
-    # Detect EV dataset
-    ev_required = {
-        "total_vehicles_registered",
-        "ev_vehicles_registered",
-        "ev_percentage_share",
-        "charging_stations_count",
-        "avg_cost_ev",
-        "avg_cost_gasoline_vehicle",
-        "gov_incentive_amount",
-        "co2_emissions_per_vehicle",
-        "fuel_price_per_liter",
-        "electricity_price_per_kWh"
-    }
-    df_cols = set([c.lower() for c in df.columns])
-    is_ev = all(req in df_cols for req in [c.lower() for c in ev_required])
+        # KPI Cards
+        ev_kpi_cards(df)
 
-    if is_ev:
-        st.success("EV dataset detected — showing EV-specific analytics")
-        # Quick KPIs
-        try:
-            overview_kpis(df)
-        except Exception:
-            # fallback
-            st.write("KPIs not available due to missing columns.")
-        # correlation w/ avg_cost_ev (numeric only)
-        st.markdown("---")
-        st.subheader("Correlation with avg_cost_ev")
-        numeric = df.select_dtypes(include=[np.number])
-        if "avg_cost_ev" in numeric.columns:
-            st.write(numeric.corr()["avg_cost_ev"].sort_values(ascending=False))
-        else:
-            st.info("avg_cost_ev not numeric or missing.")
-
-        # scatter plot
-        st.markdown("---")
-        st.subheader("Charging Stations vs EV Registrations")
-        if "charging_stations_count" in df.columns and "ev_vehicles_registered" in df.columns:
-            fig = px.scatter(df, x="charging_stations_count", y="ev_vehicles_registered", trendline="ols")
+        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+        st.subheader("📈 Charging Stations vs EV Registrations")
+        if "charging_stations_count" in df and "ev_vehicles_registered" in df:
+            fig = px.scatter(
+                df,
+                x="charging_stations_count",
+                y="ev_vehicles_registered",
+                trendline="ols",
+            )
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Required columns for this plot are missing.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Correlation
+        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+        st.subheader("📉 Correlation Heatmap (Numeric Columns)")
+        num = df.select_dtypes(include=[np.number])
+        fig, ax = plt.subplots(figsize=(8, 4))
+        sns.heatmap(num.corr(), cmap="Greens", annot=False, ax=ax)
+        st.pyplot(fig)
+        st.markdown("</div>", unsafe_allow_html=True)
+
     else:
-        st.warning("Non-EV dataset detected — switching to generic analytics mode.")
-        st.markdown("---")
-        st.subheader("Dataset Summary")
-        st.write(df.describe(include="all"))
+        st.warning("Non-EV dataset detected — Using generic analytics.")
 
-        numeric_cols = df.select_dtypes(include=[np.number])
-        if numeric_cols.shape[1] >= 2:
-            st.subheader("Numeric Correlation Matrix")
-            st.write(numeric_cols.corr())
-        else:
-            st.info("Not enough numeric columns for correlation matrix.")
+        # Numeric histogram
+        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+        st.subheader("📈 Example Visualization")
+        num = df.select_dtypes(include=[np.number])
+        col = num.columns[0]
+        fig = px.histogram(df, x=col)
+        st.plotly_chart(fig, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("---")
-        suggested_visualizations(df)
-    st.markdown('</div>', unsafe_allow_html=True)
 
-# helper to show KPIs (EV)
-def overview_kpis(df):
-    st.markdown('<div style="display:flex;gap:14px;">', unsafe_allow_html=True)
-    # Total EVs Registered
-    if "ev_vehicles_registered" in df.columns:
-        total_ev = int(df["ev_vehicles_registered"].sum())
-    else:
-        total_ev = int(df.shape[0] * 10)
-    # Average EV cost
-    avg_cost = int(df["avg_cost_ev"].mean()) if "avg_cost_ev" in df.columns else 0
-    # Charging stations
-    stations = int(df["charging_stations_count"].sum()) if "charging_stations_count" in df.columns else 0
-    # Incentives average
-    incentive = int(df["gov_incentive_amount"].mean()) if "gov_incentive_amount" in df.columns else 0
-
-    st.markdown(f'<div class="card"><div class="kpi">{total_ev:,}</div><div class="kpi-sub">Total EVs Registered</div></div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="card"><div class="kpi">${avg_cost:,}</div><div class="kpi-sub">Avg EV Cost</div></div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="card"><div class="kpi">{stations:,}</div><div class="kpi-sub">Charging Stations</div></div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="card"><div class="kpi">${incentive:,}</div><div class="kpi-sub">Avg Gov Incentive</div></div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ----------------------------
-# Policy Simulator page
-# ----------------------------
+# ------------------------------------------------------------
+# POLICY SIMULATOR
+# ------------------------------------------------------------
 def simulator_page():
+    top_header()
+
     if st.session_state.df is None:
-        st.info("Upload dataset on Home to use the Policy Simulator.")
+        st.warning("Upload dataset first.")
         return
 
     df = st.session_state.df.copy()
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.title("Policy Simulator — Multi-Policy Scenario")
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.subheader("🛠️ EV Policy Simulator — Multi-Policy Model")
 
-    # sidebar-like controls in main area for better UI
-    st.subheader("Adjust policy levers")
-    c1, c2 = st.columns(2)
-    with c1:
-        incentive = st.number_input("Government Incentive (USD)", min_value=0, max_value=50000, value=int(df["gov_incentive_amount"].mean() if "gov_incentive_amount" in df.columns else 3000), step=500)
-        add_stations = st.number_input("Add Charging Stations", min_value=0, max_value=20000, value=100, step=10)
-    with c2:
-        tax = st.slider("Tax Incentive (%)", -50, 100, 0)
-        fuel_price = st.number_input("Fuel Price (USD per liter)", value=float(df["fuel_price_per_liter"].mean() if "fuel_price_per_liter" in df.columns else 1.5))
-        elec_price = st.number_input("Electricity Price (USD/kWh)", value=float(df["electricity_price_per_kWh"].mean() if "electricity_price_per_kWh" in df.columns else 0.15))
-
-    # defaults for model-required fields
-    total_vehicles_default = int(df["total_vehicles_registered"].mean()) if "total_vehicles_registered" in df.columns else 100000
-    ev_pct_default = float(df["ev_percentage_share"].mean()) if "ev_percentage_share" in df.columns else 1.0
-    avg_cost_ev_default = float(df["avg_cost_ev"].mean()) if "avg_cost_ev" in df.columns else 30000.0
-    gas_cost_default = float(df["avg_cost_gasoline_vehicle"].mean()) if "avg_cost_gasoline_vehicle" in df.columns else 25000.0
-    co2_default = float(df["co2_emissions_per_vehicle"].mean()) if "co2_emissions_per_vehicle" in df.columns else 120.0
-    charging_base = float(df["charging_stations_count"].mean()) if "charging_stations_count" in df.columns else 1000.0
-
-    st.markdown("---")
-    st.subheader("Model Input Preview (editable)")
-    input_map = {
-        "total_vehicles_registered": total_vehicles_default,
-        "ev_percentage_share": ev_pct_default,
-        "charging_stations_count": charging_base + add_stations,
-        "avg_cost_ev": st.number_input("avg_cost_ev (editable)", value=avg_cost_ev_default, step=500.0),
-        "avg_cost_gasoline_vehicle": gas_cost_default,
-        "gov_incentive_amount": incentive,
-        "co2_emissions_per_vehicle": co2_default,
-        "fuel_price_per_liter": fuel_price,
-        "electricity_price_per_kWh": elec_price
+    # Defaults
+    defaults = {
+        c: float(df[c].mean()) if c in df else 0 for c in PRED_FEATURES
     }
 
-    st.json(input_map)
+    # UI Inputs
+    sim_inputs = {}
+    for k in PRED_FEATURES:
+        sim_inputs[k] = st.number_input(k, value=defaults[k])
 
-    if st.button("🔮 Run Simulation & Predict EV Registrations"):
-        pred, err = predict_with_model(input_map)
+    if st.button("🔮 Predict EV Registrations"):
+        pred, err = predict_ev_registration(sim_inputs)
         if err:
             st.error(err)
         else:
-            st.success("Prediction complete")
-            st.metric(label="Estimated EV Registrations (annual)", value=f"{int(pred):,}")
-            # Compare baseline with zero incentive
-            baseline_map = input_map.copy()
-            baseline_map["gov_incentive_amount"] = 0
-            baseline_pred, _ = predict_with_model(baseline_map)
-            scenario_df = pd.DataFrame({
-                "Scenario": ["Baseline (0 incentive)", "Simulation"],
-                "Predicted": [int(baseline_pred) if baseline_pred else 0, int(pred)]
-            })
-            fig = px.bar(scenario_df, x="Scenario", y="Predicted", text="Predicted")
-            st.plotly_chart(fig, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+            st.success("Prediction Successful!")
+            st.metric("Estimated EV Registrations", f"{int(pred):,}")
 
-# ----------------------------
-# AI Assistant page (chat style)
-# ----------------------------
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ------------------------------------------------------------
+# AI ASSISTANT — GLASS CHAT + GROQ LLM + TF-IDF RAG
+# ------------------------------------------------------------
 def ai_assistant_page():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.header("AI Assistant — Dataset Retriever (TF-IDF)")
+    top_header()
 
     if st.session_state.df is None:
-        st.info("Upload dataset on Home to use the assistant.")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.warning("Please upload a dataset first.")
         return
 
-    # simple chat UI
-    query = st.text_input("Ask a question about your dataset (e.g., 'highest EV registrations')")
-    k = st.slider("Results to return", 1, 6, 3)
+    df = st.session_state.df
+
+    st.subheader("🤖 AI Assistant (Glass UI + Groq LLM)")
+
+    # Chat history bubbles
+    for role, msg in st.session_state.chat_history:
+        if role == "user":
+            st.markdown(f"<div class='chat-bubble-user'>{msg}</div>",
+                        unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div class='chat-bubble-bot'>{msg}</div>",
+                        unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Input
+    query = st.text_input("Ask a question:")
+
     if st.button("Ask"):
-        with st.spinner("Searching dataset..."):
-            resp = ai_query(query, top_k=k)
-        st.markdown("**Assistant response:**")
-        st.code(resp)
-    st.markdown('</div>', unsafe_allow_html=True)
+        # Retrieve rows
+        context = ai_retrieve(df, query, top_k=3)
 
-# ----------------------------
-# Home page
-# ----------------------------
-def home_page():
-    top_header()
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("Upload or load sample dataset")
-    upload_area()
-    st.markdown("---")
-    if st.session_state.df is not None:
-        st.subheader("Quick Preview")
-        st.dataframe(safe_display_df(st.session_state.df, n=6), use_container_width=True)
-        st.markdown("---")
-        st.caption("Use the navigation (top-left) to access Analytics, AI Assistant and Simulator.")
-    st.markdown('</div>', unsafe_allow_html=True)
+        # LLM answer
+        answer = call_llm_groq(query, context)
 
-# ----------------------------
-# Settings page
-# ----------------------------
-def settings_page():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("Settings")
-    st.write("Adjust app preferences")
-    st.checkbox("Dark mode", value=st.session_state.dark_mode, key="ui_dark")
-    st.session_state.dark_mode = st.session_state.ui_dark
-    st.markdown("Model files should be placed in `./models/` folder.")
-    st.write(model_status)
-    st.markdown('</div>', unsafe_allow_html=True)
+        # Add to chat
+        st.session_state.chat_history.append(("user", query))
+        st.session_state.chat_history.append(("bot", answer))
 
-# ----------------------------
-# Main layout & navigation
-# ----------------------------
+        # Display live
+        st.markdown(f"<div class='chat-bubble-user'>{query}</div>",
+                    unsafe_allow_html=True)
+        st.markdown(f"<div class='chat-bubble-bot'>{answer}</div>",
+                    unsafe_allow_html=True)
+
+        st.subheader("📄 Dataset Context Used")
+        st.code(context)
+
+    if st.button("Clear Chat"):
+        st.session_state.chat_history = []
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ------------------------------------------------------------
+# MAIN ROUTER
+# ------------------------------------------------------------
 def main():
-    # header + sidebar
-    top_header()
-    sidebar_area()
+    # If user not logged in → show login
+    if not st.session_state.logged_in:
+        login_page()
+        return
 
-    # top navigation simulated via sidebar selectbox for responsiveness
-    pages = ["Home", "Analytics", "Simulator", "AI Assistant", "Settings"]
-    choice = st.sidebar.selectbox("Navigation", pages, index=0)
+    # Navigation
+    page = navigation_menu()
 
-    # route
-    if choice == "Home":
+    # Routing
+    if page == "Home":
         home_page()
-    elif choice == "Analytics":
+    elif page == "Analytics":
         analytics_page()
-    elif choice == "Simulator":
+    elif page == "Simulator":
         simulator_page()
-    elif choice == "AI Assistant":
+    elif page == "AI Assistant":
         ai_assistant_page()
-    elif choice == "Settings":
+    elif page == "Settings":
         settings_page()
-    else:
-        st.info("Select a page from the sidebar.")
 
-    # footer
-    st.markdown("<div class='footer'>Built with ❤️ — EV Innovate</div>", unsafe_allow_html=True)
+    # Footer
+    st.markdown(
+        "<div style='text-align:center; margin-top:30px; opacity:0.6;'>"
+        "EV Innovate Pro © 2025 — Powered by Streamlit + Groq LLM"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
+
+# Run the app
 if __name__ == "__main__":
     main()
