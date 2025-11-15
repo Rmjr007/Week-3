@@ -21,6 +21,10 @@ https://ev-green-policy-simulator.onrender.com
 ✔ **Username:** `admin`  
 ✔ **Password:** `password`  
 *(Evaluation access for faculty/testing only)*
+⚠️ **Important Note:**  
+After entering the username and password, you need to **click the Login button twice** to enter the application.  
+(This is due to an authentication refresh in the Streamlit session state.)
+
 
 ### 📁 Files Used for Deployment
 - `app.py`
