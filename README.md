@@ -17,6 +17,11 @@ This week, I deployed the **EV Green Policy Simulator** as a live web applicatio
 ### 🔗 Live App URL
 https://ev-green-policy-simulator.onrender.com
 
+### 🔐 Application Login Details
+✔ **Username:** `admin`  
+✔ **Password:** `password`  
+*(Evaluation access for faculty/testing only)*
+
 ### 📁 Files Used for Deployment
 - `app.py`
 - `models/ev_policy_best_model.pkl`
